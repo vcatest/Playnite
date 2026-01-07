@@ -15,7 +15,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: recursive # Playnite uses submodules
+        submodules: recursive
+
+    # FIX: Install Mono to provide .NET Framework 4.7.1 reference assemblies.
+    # This solves the MSB3644 error.
+    - name: Install Mono
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mono-devel
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -24,7 +31,6 @@ jobs:
           8.0.x
           9.0.x
 
-    # Dynamic Solution Finder
     - name: Find Solution File
       id: find-sln
       shell: pwsh
@@ -44,23 +50,21 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore "${{ env.SLN_PATH }}"
 
-    # ⚠️ This build step is expected to fail on Ubuntu for WPF apps.
-    # We use 'continue-on-error' so the workflow doesn't stop, allowing Embold to still scan the code.
+    # 'continue-on-error' is CRITICAL here. 
+    # Even with Mono installed, the build will eventually fail because Playnite uses WPF (Windows UI),
+    # which does not exist on Linux. This flag forces the workflow to proceed to Embold Analysis anyway.
     - name: Build
       continue-on-error: true
       run: dotnet build "${{ env.SLN_PATH }}" --no-restore --configuration Release
 
     - name: Embold Analyse
       run: |
-        # Download Linux version of the scanner
         curl ${{ vars.EMBOLD_SCANNER_URL}} -o browserstack-codequality-scanner-archive.tar.gz
         tar xvf browserstack-codequality-scanner-archive.tar.gz
         echo "Download and extract BrowserStack CQ Scanner done"
         
-        # ⚠️ WARNING: You provided the same Repo ID (316b...) as SubtitleEdit.
-        # Please ensure this ID is unique for Playnite, or you will overwrite your other report.
+        # Using the Repo ID you provided: 316b066a57a4611fdecf0046aa1f26f5
         curl --silent --location --request GET "${{ vars.EMBOLD_URL_CS}}/api/v1/repositories/316b066a57a4611fdecf0046aa1f26f5/scans/config/download" --header "Authorization:Bearer ${{ secrets.EMBOLD_TOKEN_CS}}" -o repository-configuration.json
         echo "Download repository configuration file done"
         
-        # Run Analysis
         ./browserstack-codequality-scanner/bin/embold-scanner analyse -u ${{ vars.EMBOLD_URL_CS}} -t ${{ secrets.EMBOLD_TOKEN_CS}} -r 316b066a57a4611fdecf0046aa1f26f5 -b . -d ./embold-data -c ./repository-configuration.json -v
