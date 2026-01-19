@@ -1,0 +1,70 @@
+name: Build Playnite (Ubuntu)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build:
+    name: Build and Analyze
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # FIX: Install Mono to provide .NET Framework 4.7.1 reference assemblies.
+    # This solves the MSB3644 error.
+    - name: Install Mono
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mono-devel
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+
+    - name: Find Solution File
+      id: find-sln
+      shell: pwsh
+      run: |
+        echo "Searching for .sln files..."
+        $slnFile = Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1
+        
+        if ($null -eq $slnFile) {
+            echo "::error::No .sln file found! Listing all files to help debug:"
+            Get-ChildItem -Recurse | Select-Object FullName
+            exit 1
+        }
+        
+        echo "Found solution: $($slnFile.FullName)"
+        echo "SLN_PATH=$($slnFile.FullName)" >> $env:GITHUB_ENV
+
+    - name: Restore dependencies
+      run: dotnet restore "${{ env.SLN_PATH }}"
+
+    # 'continue-on-error' is CRITICAL here. 
+    # Even with Mono installed, the build will eventually fail because Playnite uses WPF (Windows UI),
+    # which does not exist on Linux. This flag forces the workflow to proceed to Embold Analysis anyway.
+    - name: Build
+      continue-on-error: true
+      run: dotnet build "${{ env.SLN_PATH }}" --no-restore --configuration Release
+
+    - name: Embold Analyse
+      run: |
+        curl ${{ vars.EMBOLD_SCANNER_URL}} -o browserstack-codequality-scanner-archive.tar.gz
+        tar xvf browserstack-codequality-scanner-archive.tar.gz
+        echo "Download and extract BrowserStack CQ Scanner done"
+        
+        # Using the Repo ID you provided: 316b066a57a4611fdecf0046aa1f26f5
+        curl --silent --location --request GET "http://3.66.212.6:3000/api/v1/repositories/82dba7248b43965950f848fa626fda5b/scans/config/download" --header "Authorization:Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTc2ODgzMDQ5MjM5MSwiaWF0IjoxNzY4ODMwNDkyfQ.YaqrvwGShoLb1OqK8oCq4ffd8SWLZcQ7fEm8v6sefYZ3J3OdOws5Z1f1irNChf6yFnoXfmUAfmj30Bu5QfE2Iw" -o repository-configuration.json
+        echo "Download repository configuration file done"
+        
+        ./browserstack-codequality-scanner/bin/embold-scanner analyse -u http://3.66.212.6:3000 -t eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTc2ODgzMDQ5MjM5MSwiaWF0IjoxNzY4ODMwNDkyfQ.YaqrvwGShoLb1OqK8oCq4ffd8SWLZcQ7fEm8v6sefYZ3J3OdOws5Z1f1irNChf6yFnoXfmUAfmj30Bu5QfE2Iw -r 82dba7248b43965950f848fa626fda5b -b . -d ./embold-data -c ./repository-configuration.json -v
