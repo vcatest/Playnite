@@ -39,6 +39,11 @@ jobs:
       # Note: Replace "your_organization_key" with your actual SonarCloud organization key
       run: dotnet sonarscanner begin /k:"vcatest_Playnite" /o:"vcatest" /d:sonar.token="96776fa54a595ed6a86cfb00e41cf351b5af5c0e" /d:sonar.host.url="https://sonarcloud.io/"
       
+    - name: Add .NET Framework Reference Assemblies
+      working-directory: ./source
+      run: |
+        echo '<Project><ItemGroup><PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" /></ItemGroup></Project>' > Directory.Build.props
+    
     ## NEW: Build the project (Required for Sonar analysis)
     - name: Build Project
       working-directory: ./source
